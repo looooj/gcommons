@@ -129,7 +129,7 @@ func GetLogger() *log.Logger {
 	return thttpLogger
 }
 
-func RunServer(configFilename string, logname string) {
+func RunServer(configFilename string) {
 
 	config, _ := LoadServerConfig(configFilename)
 	if config == nil {
