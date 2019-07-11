@@ -17,7 +17,8 @@ var serverShutdownFlags []int
 var chanServerShutdown = make(chan int)
 var signalInterrupt = make(chan os.Signal, 1)
 var myMux = http.NewServeMux()
-var serverLogName = "thttp.log"
+var thttpLogger *log.Logger;
+var thttpLoggerFile *os.File;
 
 func HandlerHello(w http.ResponseWriter, r *http.Request) {
 
@@ -108,7 +109,27 @@ func AddHandler(path string ,handler func(http.ResponseWriter, *http.Request)) {
 
 }
 
-func RunServer(configFilename string) {
+func InitLogger(logFilename string) {
+
+	logFile, err := os.OpenFile(logFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+
+	if err != nil {
+
+		logFile, _ := os.OpenFile("/tmp/thttp.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		thttpLoggerFile = logFile
+	}	else  {
+		thttpLoggerFile = logFile
+	}
+
+	thttpLogger = log.New(thttpLoggerFile, "thttp ", log.LstdFlags)
+}
+
+func GetLogger() *log.Logger {
+
+	return thttpLogger
+}
+
+func RunServer(configFilename string, logname string) {
 
 	config, _ := LoadServerConfig(configFilename)
 	if config == nil {
@@ -123,17 +144,6 @@ func RunServer(configFilename string) {
 	go func() {
 		log.Printf("Server Run ...")
 	}()
-
-	logFile, _ := os.OpenFile("proxy.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	defer logFile.Close()
-	defer logFile.Sync()
-
-	//proxyLogger := log.New(logFile, "proxy ", log.LstdFlags)
-	//defer proxyLogger.Close()
-
-	//var logGoProxy = goproxy.RespConditionFunc(func(resp *http.Response,req *http.Request)bool {
-	//	return true
-	//})
 
 	var haveError = false
 	for i := 0; i < config.Get("servers").Len() && !haveError; i++ {
