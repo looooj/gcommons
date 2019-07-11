@@ -129,6 +129,14 @@ func GetLogger() *log.Logger {
 	return thttpLogger
 }
 
+func EnableShutdown() {
+	AddHandler("/shutdown", HandlerShutdown)
+}
+
+func EnableHello() {
+	AddHandler("/hello", HandlerHello)
+}
+
 func RunServer(configFilename string) {
 
 	config, _ := LoadServerConfig(configFilename)
