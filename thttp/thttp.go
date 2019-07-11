@@ -84,6 +84,7 @@ func WaitServer() {
 			}
 		default:
 			allShutdown := true
+			time.Sleep(500 * time.Millisecond)
 			for i := 0; i < len(serverShutdownFlags); i++ {
 				if serverShutdownFlags[i] == 0 {
 					allShutdown = false
