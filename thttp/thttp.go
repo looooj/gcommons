@@ -8,17 +8,18 @@ import (
 	"os"
 	"os/signal"
 	"time"
-
+    "errors" 
 	"github.com/looooj/gcommons/json"
 )
 
 var servers []*http.Server
 var serverShutdownFlags []int
-var chanServerShutdown = make(chan int)
-var signalInterrupt = make(chan os.Signal, 1)
+var serverShutdownChan = make(chan int)
+var allServerShutdownChan = make(chan int)
+var signalChan = make(chan os.Signal, 1)
 var myMux = http.NewServeMux()
-var thttpLogger *log.Logger;
-var thttpLoggerFile *os.File;
+var thttpLogger *log.Logger
+var thttpLoggerFile *os.File
 
 func HandlerHello(w http.ResponseWriter, r *http.Request) {
 
@@ -35,11 +36,11 @@ func shutdownServer() {
 				if err := server.Shutdown(context.Background()); err != nil {
 					log.Printf("Server Shutdown: %v", err)
 				}
-				chanServerShutdown <- idx
+				serverShutdownChan <- idx
 			}(i, server)
 		}
 	}
-	close(signalInterrupt)
+	close(signalChan)
 }
 
 func HandlerShutdown(w http.ResponseWriter, r *http.Request) {
@@ -54,48 +55,37 @@ func HandlerShutdown(w http.ResponseWriter, r *http.Request) {
 
 func HandlerSignalInterrupt() {
 	go func() {
-		signal.Notify(signalInterrupt, os.Interrupt)
-		for {
-			select {
-			case _, ok := <-signalInterrupt:
-				if ok {
-					log.Printf("Handle signal")
-					shutdownServer()
-				} else {
-					log.Printf("Exit wait signal")
-				}
-				return
-			default:
-				time.Sleep(10 * time.Millisecond)
-				continue
-			}
+		signal.Notify(signalChan, os.Interrupt)
+		for _ = range signalChan {
+
+			fmt.Println("recv Interrupt")
+			shutdownServer()
 		}
+		fmt.Println("HandlerSignalInterrupt")
 	}()
 }
 
 func WaitServer() {
 
-	for {
-		select {
-		case idx, ok := <-chanServerShutdown:
-			if ok {
-				serverShutdownFlags[idx] = 1
-				log.Printf("Shutdown[%d]", idx)
-			}
-		default:
+	go func() {
+		for {
+			idx := <-serverShutdownChan
+			serverShutdownFlags[idx] = 1
+			log.Printf("Shutdown[%d]", idx)
+
 			allShutdown := true
-			time.Sleep(500 * time.Millisecond)
 			for i := 0; i < len(serverShutdownFlags); i++ {
 				if serverShutdownFlags[i] == 0 {
 					allShutdown = false
 				}
 			}
 			if allShutdown {
-				log.Printf("All Shutdown")
+				allServerShutdownChan <- 1
 				return
 			}
 		}
-	}
+	}()
+	<-allServerShutdownChan
 }
 
 func LoadServerConfig(fn string) (*json.JsonObject, error) {
@@ -104,9 +94,9 @@ func LoadServerConfig(fn string) (*json.JsonObject, error) {
 	return config, err
 }
 
-func AddHandler(path string ,handler func(http.ResponseWriter, *http.Request)) {
+func AddHandler(path string, handler func(http.ResponseWriter, *http.Request)) {
 
-	myMux.HandleFunc( path, handler)
+	myMux.HandleFunc(path, handler)
 
 }
 
@@ -118,7 +108,7 @@ func InitLogger(logFilename string) {
 
 		logFile, _ := os.OpenFile("/tmp/thttp.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		thttpLoggerFile = logFile
-	}	else  {
+	} else {
 		thttpLoggerFile = logFile
 	}
 
@@ -138,16 +128,16 @@ func EnableHello() {
 	AddHandler("/hello", HandlerHello)
 }
 
-func RunServer(configFilename string) {
+func RunServer(configFilename string)error {
 
-	config, _ := LoadServerConfig(configFilename)
-	if config == nil {
-		return
+	config, err := LoadServerConfig(configFilename)
+	if err != nil {
+		return err
 	}
 
 	if !config.Exists("servers") {
 		log.Printf("invalid config")
-		return
+		return errors.New("invalid config")
 	}
 
 	go func() {
@@ -160,7 +150,6 @@ func RunServer(configFilename string) {
 		addr, _ := config.Get("servers").GetByIndex(i).GetString("addr")
 		log.Printf("addr %v", addr)
 		var server *http.Server
-
 		server = &http.Server{
 			Addr:    addr,
 			Handler: myMux,
@@ -171,7 +160,7 @@ func RunServer(configFilename string) {
 	}
 
 	HandlerSignalInterrupt()
-
+    var startError error = nil;
 	for serverIndex, server := range servers {
 
 		go func(idx int, server *http.Server) {
@@ -182,20 +171,25 @@ func RunServer(configFilename string) {
 				if err != http.ErrServerClosed {
 					log.Printf("Server[%d]:\n %v", idx, err)
 					haveError = true
+					startError = err
 					servers[idx] = nil
 					serverShutdownFlags[idx] = 1
+					serverShutdownChan <- idx
 				}
 			}
 		}(serverIndex, server)
 	}
 
-	time.Sleep(5 * time.Second)
-	if haveError {
+	if  startError != nil  {
 		shutdownServer()
+		return startError
 	}
 
-	WaitServer()
-	time.Sleep(1 * time.Second)
+	return nil
+	//time.Sleep(5 * time.Second)
+	//if haveError {
+	//	shutdownServer()
+	//}
+	//WaitServer()
+	//time.Sleep(1 * time.Second)
 }
-
-
